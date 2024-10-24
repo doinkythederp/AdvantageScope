@@ -21,6 +21,7 @@ import {
 import fs from "fs";
 import jsonfile from "jsonfile";
 import net from "net";
+import { spawn, type ChildProcess } from "node:child_process";
 import os from "os";
 import path from "path";
 import { PNG } from "pngjs";
@@ -46,6 +47,7 @@ import {
 } from "./BetaConfig";
 import {
   APP_VERSION,
+  CARGO_V5_DATA_TIMEOUT_MS,
   DEFAULT_PREFS,
   DOWNLOAD_CONNECT_TIMEOUT_MS,
   DOWNLOAD_PASSWORD,
@@ -112,6 +114,11 @@ let rlogDataArrays: { [id: number]: Uint8Array } = {};
 let pathPlannerSockets: { [id: number]: net.Socket } = {};
 let pathPlannerSocketTimeouts: { [id: number]: NodeJS.Timeout } = {};
 let pathPlannerDataStrings: { [id: number]: string } = {};
+
+// Live cargo-v5 variables
+let cargoV5Children: { [id: number]: ChildProcess } = {};
+let cargoV5ChildrenTimeouts: { [id: number]: NodeJS.Timeout } = {};
+let cargoV5DataStrings: { [id: number]: string } = {};
 
 // Download variables
 let downloadClient: Client | null = null;
@@ -366,6 +373,63 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
           "The legacy numeric array format for structured data is deprecated and will be removed in 2026. Check the AdvantageScope documentation for details on migrating to a modern alternative.",
         icon: WINDOW_ICON
       });
+      break;
+
+    case "live-cargo-v5-start":
+      console.log("cargo v5 start");
+      cargoV5Children[windowId]?.kill();
+      cargoV5Children[windowId] = spawn("cargo", ["v5", "terminal"]);
+
+      const v5TextDecoder = new TextDecoder();
+      cargoV5DataStrings[windowId] = "";
+
+      cargoV5Children[windowId].stdout?.on("data", (data) => {
+        console.log("v5 data:", data);
+        cargoV5DataStrings[windowId] += v5TextDecoder.decode(data);
+
+        if (cargoV5ChildrenTimeouts[windowId] !== null) clearTimeout(cargoV5ChildrenTimeouts[windowId]);
+        cargoV5ChildrenTimeouts[windowId] = setTimeout(() => {
+          console.log("cargo v5 stop");
+          cargoV5Children[windowId]?.kill();
+        }, CARGO_V5_DATA_TIMEOUT_MS);
+
+        while (cargoV5DataStrings[windowId].includes("\n")) {
+          let newLineIndex = cargoV5DataStrings[windowId].indexOf("\n");
+          let line = cargoV5DataStrings[windowId].slice(0, newLineIndex);
+          cargoV5DataStrings[windowId] = cargoV5DataStrings[windowId].slice(newLineIndex + 1);
+
+          console.log("line", line);
+
+          let success = sendMessage(window, "live-data", {
+            uuid: message.data.uuid,
+            success: true,
+            string: line
+          });
+          if (!success) {
+            console.log("msg send fail");
+            console.log("cargo v5 stop");
+            cargoV5Children[windowId]?.kill();
+          }
+        }
+      });
+
+      cargoV5Children[windowId].stdout?.pipe(process.stderr);
+      cargoV5Children[windowId].stderr?.pipe(process.stderr);
+
+      cargoV5Children[windowId].on("error", (e) => {
+        console.log("error", e);
+        sendMessage(window, "live-data", { uuid: message.data.uuid, success: false });
+      });
+
+      cargoV5Children[windowId].on("close", () => {
+        console.log("close");
+        sendMessage(window, "live-data", { uuid: message.data.uuid, success: false });
+      });
+      break;
+
+    case "live-cargo-v5-stop":
+      console.log("cargo v5 stop");
+      cargoV5Children[windowId]?.kill();
       break;
 
     case "live-rlog-start":
@@ -3092,7 +3156,8 @@ app.whenReady().then(() => {
         oldPrefs.liveMode === "nt4-akit" ||
         oldPrefs.liveMode === "phoenix" ||
         oldPrefs.liveMode === "pathplanner" ||
-        oldPrefs.liveMode === "rlog")
+        oldPrefs.liveMode === "rlog" ||
+        oldPrefs.liveMode === "vexide")
     ) {
       prefs.liveMode = oldPrefs.liveMode;
     }

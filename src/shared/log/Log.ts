@@ -553,6 +553,10 @@ export default class Log {
       }
     }
   }
+  /** Writes a decoded vexide JSON object to the field. */
+  putVexideJSON(key: string, timestamp: number, value: unknown) {
+    this.putUnknownStruct(key, timestamp, value, true);
+  }
 
   /** Writes a JSON-encoded string value to the field. */
   putJSON(key: string, timestamp: number, value: string) {
