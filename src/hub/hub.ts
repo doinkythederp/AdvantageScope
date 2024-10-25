@@ -19,10 +19,10 @@ import LiveDataTuner from "./dataSources/LiveDataTuner";
 import loadZebra from "./dataSources/LoadZebra";
 import PathPlannerSource from "./dataSources/PathPlannerSource";
 import PhoenixDiagnosticsSource from "./dataSources/PhoenixDiagnosticsSource";
+import XYVSource from "./dataSources/XYVSource";
 import { NT4Publisher, NT4PublisherStatus } from "./dataSources/nt4/NT4Publisher";
 import NT4Source from "./dataSources/nt4/NT4Source";
 import RLOGServerSource from "./dataSources/rlog/RLOGServerSource";
-import VexideSource from "./dataSources/vexide/VexideSource.js";
 
 // Constants
 const STATE_SAVE_PERIOD_MS = 250;
@@ -404,8 +404,8 @@ function startLive(isSim: boolean) {
     case "rlog":
       liveSource = new RLOGServerSource();
       break;
-    case "vexide":
-      liveSource = new VexideSource();
+    case "xyv":
+      liveSource = new XYVSource();
       break;
   }
 

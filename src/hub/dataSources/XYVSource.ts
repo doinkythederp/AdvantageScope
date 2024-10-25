@@ -1,7 +1,12 @@
-import Log from "../../../shared/log/Log";
-import { LiveDataSource, LiveDataSourceStatus } from "../LiveDataSource";
+import Log from "../../shared/log/Log";
+import { LiveDataSource, LiveDataSourceStatus } from "./LiveDataSource";
 
-export default class VexideSource extends LiveDataSource {
+interface XYVUpdate {
+  data: Record<string, unknown>;
+  now_sec: number;
+}
+
+export default class XYVSource extends LiveDataSource {
   private RECONNECT_DELAY_MS = 500;
   private timeout: NodeJS.Timeout | null = null;
   private liveZeroTime = 0;
@@ -17,7 +22,7 @@ export default class VexideSource extends LiveDataSource {
       this.setStatus(LiveDataSourceStatus.Error);
     } else {
       this.log = new Log();
-      window.sendMainMessage("live-cargo-v5-start", {
+      window.sendMainMessage("live-vex-v5-start", {
         uuid: this.UUID
       });
     }
@@ -25,7 +30,7 @@ export default class VexideSource extends LiveDataSource {
 
   stop() {
     super.stop();
-    window.sendMainMessage("live-cargo-v5-stop");
+    window.sendMainMessage("live-vex-v5-stop");
   }
 
   handleMainMessage(data: any) {
@@ -39,31 +44,35 @@ export default class VexideSource extends LiveDataSource {
     }
 
     if (data.success) {
-      // Update time on first connection
-      if (this.liveZeroTime === 0) {
-        this.liveZeroTime = new Date().getTime() / 1000;
-      }
-
       // Receiving data, set to active
       this.setStatus(LiveDataSourceStatus.Active);
 
       // Decode JSON
-      let decoded: any = null;
+      let decoded: XYVUpdate | null = null;
       try {
         decoded = JSON.parse(data.string);
       } catch {}
 
       // Add data
       if (decoded !== null) {
-        const timestamp = new Date().getTime() / 1000 - this.liveZeroTime;
-        for (const [key, value] of Object.entries(decoded.updates)) [this.log.putVexideJSON(key, timestamp, value)];
+        const now = Date.now() / 1000;
+        // Update time on first data
+        if (this.liveZeroTime === 0) {
+          this.liveZeroTime = now - decoded.now_sec;
+        }
+
+        const timestamp = now - this.liveZeroTime;
+
+        for (const [key, value] of Object.entries(decoded.data)) {
+          this.log.putXYV(key, timestamp, value);
+        }
       }
 
       // Run output callback
       if (this.outputCallback !== null) {
         this.outputCallback(this.log, () => {
           if (this.log) {
-            return new Date().getTime() / 1000 - this.liveZeroTime;
+            return Date.now() / 1000 - this.liveZeroTime;
           } else {
             return 0;
           }
@@ -77,7 +86,7 @@ export default class VexideSource extends LiveDataSource {
 
   private reconnect() {
     this.setStatus(LiveDataSourceStatus.Connecting);
-    window.sendMainMessage("live-cargo-v5-stop");
+    window.sendMainMessage("live-vex-v5-stop");
     this.timeout = setTimeout(() => {
       if (window.preferences === null) {
         // No preferences, can't reconnect
@@ -86,7 +95,7 @@ export default class VexideSource extends LiveDataSource {
         // Try to reconnect
         this.log = new Log();
         this.liveZeroTime = 0;
-        window.sendMainMessage("live-cargo-v5-start", {
+        window.sendMainMessage("live-vex-v5-start", {
           uuid: this.UUID
         });
       }

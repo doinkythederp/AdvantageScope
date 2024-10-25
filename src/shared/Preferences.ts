@@ -3,7 +3,7 @@ export default interface Preferences {
   theme: "light" | "dark" | "system";
   rioAddress: string;
   rioPath: string;
-  liveMode: "nt4" | "nt4-akit" | "phoenix" | "pathplanner" | "rlog" | "vexide";
+  liveMode: "nt4" | "nt4-akit" | "phoenix" | "pathplanner" | "rlog" | "xyv";
   liveSubscribeMode: "low-bandwidth" | "logging";
   liveDiscard: number;
   publishFilter: string;

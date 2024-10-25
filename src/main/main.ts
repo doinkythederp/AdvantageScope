@@ -47,7 +47,6 @@ import {
 } from "./BetaConfig";
 import {
   APP_VERSION,
-  CARGO_V5_DATA_TIMEOUT_MS,
   DEFAULT_PREFS,
   DOWNLOAD_CONNECT_TIMEOUT_MS,
   DOWNLOAD_PASSWORD,
@@ -73,6 +72,7 @@ import {
   SATELLITE_DEFAULT_HEIGHT,
   SATELLITE_DEFAULT_WIDTH,
   TYPE_MEMORY_FILENAME,
+  VEX_V5_DATA_TIMEOUT_MS,
   WINDOW_ICON
 } from "./Constants";
 import StateTracker, { ApplicationState, SatelliteWindowState, WindowState } from "./StateTracker";
@@ -115,10 +115,8 @@ let pathPlannerSockets: { [id: number]: net.Socket } = {};
 let pathPlannerSocketTimeouts: { [id: number]: NodeJS.Timeout } = {};
 let pathPlannerDataStrings: { [id: number]: string } = {};
 
-// Live cargo-v5 variables
-let cargoV5Children: { [id: number]: ChildProcess } = {};
-let cargoV5ChildrenTimeouts: { [id: number]: NodeJS.Timeout } = {};
-let cargoV5DataStrings: { [id: number]: string } = {};
+// Live vex-v5 variables
+let vexChildren: Record<number, ChildProcess> = {};
 
 // Download variables
 let downloadClient: Client | null = null;
@@ -375,29 +373,30 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
       });
       break;
 
-    case "live-cargo-v5-start":
+    case "live-vex-v5-start":
       console.log("cargo v5 start");
-      cargoV5Children[windowId]?.kill();
-      cargoV5Children[windowId] = spawn("cargo", ["v5", "terminal"]);
+
+      vexChildren[windowId]?.kill();
+      const v5Child = spawn("cargo", ["v5", "terminal"]);
+      vexChildren[windowId] = v5Child;
 
       const v5TextDecoder = new TextDecoder();
-      cargoV5DataStrings[windowId] = "";
+      let buffer = "";
+      let timeout: NodeJS.Timeout | null = null;
 
-      cargoV5Children[windowId].stdout?.on("data", (data) => {
-        console.log("v5 data:", data);
-        cargoV5DataStrings[windowId] += v5TextDecoder.decode(data);
+      v5Child.stdout?.on("data", (data) => {
+        buffer += v5TextDecoder.decode(data);
 
-        if (cargoV5ChildrenTimeouts[windowId] !== null) clearTimeout(cargoV5ChildrenTimeouts[windowId]);
-        cargoV5ChildrenTimeouts[windowId] = setTimeout(() => {
+        if (timeout !== null) clearTimeout(timeout);
+        timeout = setTimeout(() => {
           console.log("cargo v5 stop");
-          cargoV5Children[windowId]?.kill();
-        }, CARGO_V5_DATA_TIMEOUT_MS);
+          v5Child.kill();
+        }, VEX_V5_DATA_TIMEOUT_MS);
 
-        while (cargoV5DataStrings[windowId].includes("\n")) {
-          let newLineIndex = cargoV5DataStrings[windowId].indexOf("\n");
-          let line = cargoV5DataStrings[windowId].slice(0, newLineIndex);
-          cargoV5DataStrings[windowId] = cargoV5DataStrings[windowId].slice(newLineIndex + 1);
+        const lines = buffer.split("\n");
+        buffer = lines.pop()!;
 
+        for (const line of lines) {
           console.log("line", line);
 
           let success = sendMessage(window, "live-data", {
@@ -408,28 +407,26 @@ async function handleHubMessage(window: BrowserWindow, message: NamedMessage) {
           if (!success) {
             console.log("msg send fail");
             console.log("cargo v5 stop");
-            cargoV5Children[windowId]?.kill();
+            v5Child.kill();
           }
         }
       });
+      v5Child.stderr?.pipe(process.stderr);
 
-      cargoV5Children[windowId].stdout?.pipe(process.stderr);
-      cargoV5Children[windowId].stderr?.pipe(process.stderr);
-
-      cargoV5Children[windowId].on("error", (e) => {
+      v5Child.on("error", (e) => {
         console.log("error", e);
         sendMessage(window, "live-data", { uuid: message.data.uuid, success: false });
       });
 
-      cargoV5Children[windowId].on("close", () => {
+      v5Child.on("close", () => {
         console.log("close");
         sendMessage(window, "live-data", { uuid: message.data.uuid, success: false });
       });
       break;
 
-    case "live-cargo-v5-stop":
+    case "live-vex-v5-stop":
       console.log("cargo v5 stop");
-      cargoV5Children[windowId]?.kill();
+      vexChildren[windowId]?.kill();
       break;
 
     case "live-rlog-start":
@@ -2324,7 +2321,9 @@ function createHubWindow(state?: WindowState) {
   window.webContents.on("dom-ready", () => {
     if (!firstLoad) {
       createPorts(); // Create ports on reload
-      rlogSockets[window.id]?.destroy(); // Destroy any existing RLOG sockets
+      // Destroy any existing RLOG, VEX V5 sockets
+      rlogSockets[window.id]?.destroy();
+      vexChildren[window.id]?.kill();
     }
 
     // Launch dev tools
@@ -2410,8 +2409,15 @@ function createHubWindow(state?: WindowState) {
         buttons: ["Don't Close", "Close"],
         defaultId: 0
       });
-      if (choice === 0) event.preventDefault();
+      if (choice === 0) {
+        event.preventDefault();
+        return;
+      }
     }
+
+    // Disconnect from VEX V5 to free up the serial port
+    console.log("cargo v5 stop");
+    vexChildren[window.id]?.kill();
   });
   window.on("enter-full-screen", () => sendMessage(window, "set-fullscreen", true));
   window.on("leave-full-screen", () => sendMessage(window, "set-fullscreen", false));
@@ -3157,7 +3163,7 @@ app.whenReady().then(() => {
         oldPrefs.liveMode === "phoenix" ||
         oldPrefs.liveMode === "pathplanner" ||
         oldPrefs.liveMode === "rlog" ||
-        oldPrefs.liveMode === "vexide")
+        oldPrefs.liveMode === "xyv")
     ) {
       prefs.liveMode = oldPrefs.liveMode;
     }

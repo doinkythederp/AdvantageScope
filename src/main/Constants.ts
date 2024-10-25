@@ -59,8 +59,8 @@ export const PATHPLANNER_DATA_TIMEOUT_MS = 3000; // How long with no data until 
 export const PATHPLANNER_PING_DELAY_MS = 250; // How long to wait between pings
 export const PATHPLANNER_PING_TEXT = "ping";
 
-// cargo-v5
-export const CARGO_V5_DATA_TIMEOUT_MS = 3000; // How long with no data until timeout
+// vex-v5
+export const VEX_V5_DATA_TIMEOUT_MS = 3000; // How long with no data until timeout
 
 // Download
 export const DOWNLOAD_USERNAME = "lvuser";
